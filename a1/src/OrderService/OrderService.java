@@ -39,11 +39,8 @@ public class OrderService {
 public static void main(String[] args) throws IOException {
     loadConfig(args[0]);
 
-    // Check if the first request is "restart"
-    boolean preserveData = waitForRestart();
-
     // Initialize database based on restart status
-    setupDatabase(preserveData);
+    setupDatabase();
 
     HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
     server.createContext("/order", new OrderHandler());
@@ -75,13 +72,8 @@ public static void main(String[] args) throws IOException {
     /**
      * Creates the orders table in SQLite if it does not already exist.
      */
-private static void setupDatabase(boolean preserveData) {
+private static void setupDatabase() {
     try (Connection conn = connectDB()) {
-        if (!preserveData) {  // If not restarting, wipe DB
-            conn.createStatement().execute("DROP TABLE IF EXISTS orders;");
-            conn.createStatement().execute("DROP TABLE IF EXISTS user_purchases;");
-        }
-        
         String createOrdersTable = "CREATE TABLE IF NOT EXISTS orders (" +
                 "id TEXT PRIMARY KEY, user_id INTEGER, product_id INTEGER, quantity INTEGER);";
 
@@ -129,13 +121,10 @@ private static void setupDatabase(boolean preserveData) {
     
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            String method = exchange.getRequestMethod();
-            String path = exchange.getRequestURI().getPath();
-
-            if (method.equalsIgnoreCase("POST") && path.equals("/order")) {
-                handlePost(exchange);
-            } else if (method.equalsIgnoreCase("GET") && path.matches("/user/purchased/\\d+")) {
-                handleGetPurchases(exchange);
+            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                System.out.println("Order Service shutting down...");
+                exchange.sendResponseHeaders(200, -1);
+                server.stop(0); // Graceful shutdown
             } else {
                 exchange.sendResponseHeaders(405, -1);
             }
@@ -149,8 +138,11 @@ private static void setupDatabase(boolean preserveData) {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String method = exchange.getRequestMethod();
+            String path = exchange.getRequestURI().getPath(); 
             if (method.equalsIgnoreCase("POST")) {
                 handlePost(exchange);
+            } else if (method.equalsIgnoreCase("GET") && path.matches("/user/purchased/\\d+")) {
+                handleGetPurchases(exchange);
             } else {
                 exchange.sendResponseHeaders(405, -1);
             }
@@ -268,36 +260,36 @@ private static void setupDatabase(boolean preserveData) {
          * @param quantity  The quantity ordered.
          * @return The generated order ID.
          */
-private String processOrder(int userId, int productId, int quantity) {
-    try (Connection conn = connectDB()) {
-        String orderId = UUID.randomUUID().toString();
+        private String processOrder(int userId, int productId, int quantity) {
+            try (Connection conn = connectDB()) {
+                String orderId = UUID.randomUUID().toString();
 
-        // Insert order into orders table
-        String insertOrderSql = "INSERT INTO orders (id, user_id, product_id, quantity) VALUES (?, ?, ?, ?);";
-        PreparedStatement orderStmt = conn.prepareStatement(insertOrderSql);
-        orderStmt.setString(1, orderId);
-        orderStmt.setInt(2, userId);
-        orderStmt.setInt(3, productId);
-        orderStmt.setInt(4, quantity);
-        orderStmt.executeUpdate();
+                // Insert order into orders table
+                String insertOrderSql = "INSERT INTO orders (id, user_id, product_id, quantity) VALUES (?, ?, ?, ?);";
+                PreparedStatement orderStmt = conn.prepareStatement(insertOrderSql);
+                orderStmt.setString(1, orderId);
+                orderStmt.setInt(2, userId);
+                orderStmt.setInt(3, productId);
+                orderStmt.setInt(4, quantity);
+                orderStmt.executeUpdate();
 
-        // Update user_purchases table
-        String updatePurchaseSql = "INSERT INTO user_purchases (user_id, product_id, quantity) " +
-                                   "VALUES (?, ?, ?) ON CONFLICT(user_id, product_id) " +
-                                   "DO UPDATE SET quantity = quantity + ?;";
-        PreparedStatement purchaseStmt = conn.prepareStatement(updatePurchaseSql);
-        purchaseStmt.setInt(1, userId);
-        purchaseStmt.setInt(2, productId);
-        purchaseStmt.setInt(3, quantity);
-        purchaseStmt.setInt(4, quantity);
-        purchaseStmt.executeUpdate();
+                // Update user_purchases table
+                String updatePurchaseSql = "INSERT INTO user_purchases (user_id, product_id, quantity) " +
+                                        "VALUES (?, ?, ?) ON CONFLICT(user_id, product_id) " +
+                                        "DO UPDATE SET quantity = quantity + ?;";
+                PreparedStatement purchaseStmt = conn.prepareStatement(updatePurchaseSql);
+                purchaseStmt.setInt(1, userId);
+                purchaseStmt.setInt(2, productId);
+                purchaseStmt.setInt(3, quantity);
+                purchaseStmt.setInt(4, quantity);
+                purchaseStmt.executeUpdate();
 
-        return orderId;
-    } catch (SQLException e) {
-        e.printStackTrace();
-        return null;
-    }
-}
+                return orderId;
+            } catch (SQLException e) {
+                e.printStackTrace();
+                return null;
+            }
+        }
         
 
         /**
