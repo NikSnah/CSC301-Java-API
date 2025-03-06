@@ -68,14 +68,21 @@ public class OrderService {
     /**
      * Creates the orders table in SQLite if it does not already exist.
      */
-    private static void setupDatabase() {
-        try (Connection conn = connectDB()) {
-            String sql = "CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, product_id INTEGER, user_id INTEGER, quantity INTEGER);";
-            conn.createStatement().execute(sql);
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+private static void setupDatabase() {
+    try (Connection conn = connectDB()) {
+        String createOrdersTable = "CREATE TABLE IF NOT EXISTS orders (" +
+                "id TEXT PRIMARY KEY, user_id INTEGER, product_id INTEGER, quantity INTEGER);";
+
+        String createUserPurchasesTable = "CREATE TABLE IF NOT EXISTS user_purchases (" +
+                "user_id INTEGER, product_id INTEGER, quantity INTEGER, " +
+                "PRIMARY KEY (user_id, product_id));";
+
+        conn.createStatement().execute(createOrdersTable);
+        conn.createStatement().execute(createUserPurchasesTable);
+    } catch (SQLException e) {
+        e.printStackTrace();
     }
+}
 
     /**
      * Establishes a connection to the SQLite database.
@@ -109,10 +116,13 @@ public class OrderService {
     
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                System.out.println("OrderService shutting down...");
-                exchange.sendResponseHeaders(200, -1);
-                server.stop(0); // Graceful shutdown
+            String method = exchange.getRequestMethod();
+            String path = exchange.getRequestURI().getPath();
+
+            if (method.equalsIgnoreCase("POST") && path.equals("/order")) {
+                handlePost(exchange);
+            } else if (method.equalsIgnoreCase("GET") && path.matches("/user/purchased/\\d+")) {
+                handleGetPurchases(exchange);
             } else {
                 exchange.sendResponseHeaders(405, -1);
             }
@@ -132,6 +142,51 @@ public class OrderService {
                 exchange.sendResponseHeaders(405, -1);
             }
         }
+
+    private void handleGetPurchases(HttpExchange exchange) throws IOException {
+    String[] uriParts = exchange.getRequestURI().toString().split("/");
+    int userId;
+
+    try {
+        userId = Integer.parseInt(uriParts[3]);
+    } catch (NumberFormatException e) {
+        exchange.sendResponseHeaders(400, -1);
+        return;
+    }
+
+    try (Connection conn = connectDB()) {
+        String sql = "SELECT product_id, quantity FROM user_purchases WHERE user_id = ?;";
+        PreparedStatement stmt = conn.prepareStatement(sql);
+        stmt.setInt(1, userId);
+        ResultSet rs = stmt.executeQuery();
+
+        JSONObject response = new JSONObject();
+        boolean hasPurchases = false;
+
+        while (rs.next()) {
+            response.put(String.valueOf(rs.getInt("product_id")), rs.getInt("quantity"));
+            hasPurchases = true;
+        }
+
+        OutputStream os = exchange.getResponseBody();
+        if (!hasPurchases) {
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, 2);
+            os.write("{}".getBytes());  // Empty JSON if user has no purchases
+        } else {
+            byte[] responseBytes = response.toString().getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, responseBytes.length);
+            os.write(responseBytes);
+        }
+        os.close();
+
+    } catch (SQLException e) {
+        exchange.sendResponseHeaders(500, -1);
+        e.printStackTrace();
+    }
+}
+
 
         /**
          * Processes an order creation request.
@@ -200,22 +255,36 @@ public class OrderService {
          * @param quantity  The quantity ordered.
          * @return The generated order ID.
          */
-        private String processOrder(int userId, int productId, int quantity) {
-            try (Connection conn = connectDB()) {
-                String orderId = UUID.randomUUID().toString();
-                String sql = "INSERT INTO orders (id, user_id, product_id, quantity) VALUES (?, ?, ?, ?);";
-                PreparedStatement stmt = conn.prepareStatement(sql);
-                stmt.setString(1, orderId);
-                stmt.setInt(2, userId);
-                stmt.setInt(3, productId);
-                stmt.setInt(4, quantity);
-                stmt.executeUpdate();
-                return orderId;
-            } catch (SQLException e) {
-                e.printStackTrace();
-                return null;
-            }
-        }
+private String processOrder(int userId, int productId, int quantity) {
+    try (Connection conn = connectDB()) {
+        String orderId = UUID.randomUUID().toString();
+
+        // Insert order into orders table
+        String insertOrderSql = "INSERT INTO orders (id, user_id, product_id, quantity) VALUES (?, ?, ?, ?);";
+        PreparedStatement orderStmt = conn.prepareStatement(insertOrderSql);
+        orderStmt.setString(1, orderId);
+        orderStmt.setInt(2, userId);
+        orderStmt.setInt(3, productId);
+        orderStmt.setInt(4, quantity);
+        orderStmt.executeUpdate();
+
+        // Update user_purchases table
+        String updatePurchaseSql = "INSERT INTO user_purchases (user_id, product_id, quantity) " +
+                                   "VALUES (?, ?, ?) ON CONFLICT(user_id, product_id) " +
+                                   "DO UPDATE SET quantity = quantity + ?;";
+        PreparedStatement purchaseStmt = conn.prepareStatement(updatePurchaseSql);
+        purchaseStmt.setInt(1, userId);
+        purchaseStmt.setInt(2, productId);
+        purchaseStmt.setInt(3, quantity);
+        purchaseStmt.setInt(4, quantity);
+        purchaseStmt.executeUpdate();
+
+        return orderId;
+    } catch (SQLException e) {
+        e.printStackTrace();
+        return null;
+    }
+}
         
 
         /**
