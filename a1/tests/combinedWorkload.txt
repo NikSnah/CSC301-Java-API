@@ -4,7 +4,7 @@ USER create 3 usernameKPTgmeH 36a9@hbCa.com gOmaQKKw
 PRODUCT create 3 productname-2df398 3.99 32
 USER create 4 usernameFw5hdTh CYDJ@vMLrNA.com GMmhdr6J
 PRODUCT create 4 productname-sdd2398 35.99 9
-ORDER place 9993 3  # This should fail, no order id 9993  
+ORDER place 9993 3  # This should fail, no order id 9993   
 USER get 2
 PRODUCT create 5 productname-2398 53.99 1
 USER update 2 username:un-4Vofkp8EyolNJYJ email:glud@Ucdl4s6HBjq.com password:BkPpkkW1
