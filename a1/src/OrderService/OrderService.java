@@ -36,16 +36,23 @@ public class OrderService {
      * @param args Command-line arguments (expects a path to config.json).
      * @throws IOException if the server fails to start.
      */
-    public static void main(String[] args) throws IOException {
-        loadConfig(args[0]);
-        setupDatabase();
-        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
-        server.createContext("/order", new OrderHandler());
-        server.createContext("/shutdown", new ShutdownHandler(server));
-        server.setExecutor(null);
-        server.start();
-        System.out.println("OrderService started on port " + PORT);
-    }
+public static void main(String[] args) throws IOException {
+    loadConfig(args[0]);
+
+    // Check if the first request is "restart"
+    boolean preserveData = waitForRestart();
+
+    // Initialize database based on restart status
+    setupDatabase(preserveData);
+
+    HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
+    server.createContext("/order", new OrderHandler());
+    server.createContext("/shutdown", new ShutdownHandler(server));
+    server.setExecutor(null);
+    server.start();
+    System.out.println("OrderService started on port " + PORT);
+}
+
 
     /**
      * Loads the configuration from a JSON file.
@@ -68,8 +75,13 @@ public class OrderService {
     /**
      * Creates the orders table in SQLite if it does not already exist.
      */
-private static void setupDatabase() {
+private static void setupDatabase(boolean preserveData) {
     try (Connection conn = connectDB()) {
+        if (!preserveData) {  // If not restarting, wipe DB
+            conn.createStatement().execute("DROP TABLE IF EXISTS orders;");
+            conn.createStatement().execute("DROP TABLE IF EXISTS user_purchases;");
+        }
+        
         String createOrdersTable = "CREATE TABLE IF NOT EXISTS orders (" +
                 "id TEXT PRIMARY KEY, user_id INTEGER, product_id INTEGER, quantity INTEGER);";
 
@@ -83,6 +95,7 @@ private static void setupDatabase() {
         e.printStackTrace();
     }
 }
+
 
     /**
      * Establishes a connection to the SQLite database.

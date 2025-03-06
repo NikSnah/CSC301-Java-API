@@ -30,6 +30,25 @@ def parse_workload(workload_file, config):
             service = parts[0].upper()
             command = parts[1].lower()
 
+            # Check for shutdown in the workload file
+            if "shutdown" in lines:
+                print("Shutdown detected. Stopping all services...")
+                send_shutdown_requests(config)
+                return
+
+            # If first command is restart, notify OrderService
+            preserve_data = False
+            if lines[0] == "restart":
+                print("Restart detected. Preserving data.")
+                preserve_data = True
+                notify_restart()
+
+            # Process other workload commands
+            for line in lines:
+                if line == "restart":
+                    continue  # Ignore restart after first command
+                process_command(line, config, preserve_data)
+
             # Get service URLs from config
             if service == "USER":
                 url = f"http://{config['UserService']['ip']}:{config['UserService']['port']}/user"
@@ -122,6 +141,26 @@ def parse_workload(workload_file, config):
                     print(f"Unknown ORDER command: {command}")
             else:
                 print(f"Unknown service: {service}")
+
+def send_shutdown_requests(config):
+    """Send shutdown requests to all services."""
+    services = ["UserService", "ProductService", "OrderService", "InterServiceCommunication"]
+    for service in services:
+        url = f"http://{config[service]['ip']}:{config[service]['port']}/shutdown"
+        print(f"Shutting down {service} at {url}")
+        try:
+            requests.post(url)
+        except requests.exceptions.RequestException:
+            print(f"Failed to shut down {service}")
+
+def notify_restart():
+    """Send restart notification to OrderService."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(("127.0.0.1", 14010))
+            s.sendall(b"restart\n")
+    except ConnectionRefusedError:
+        print("OrderService is not running. Restart message not delivered.")
 
 def send_request(method, url, payload=None):
     """Send an HTTP request and print the response."""
