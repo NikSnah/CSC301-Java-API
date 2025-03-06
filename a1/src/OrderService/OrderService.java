@@ -45,11 +45,22 @@ public static void main(String[] args) throws IOException {
     HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
     server.createContext("/order", new OrderHandler());
     server.createContext("/shutdown", new ShutdownHandler(server));
+    server.createContext("/user/purchased", new OrderHandler());
     server.setExecutor(null);
     server.start();
     System.out.println("OrderService started on port " + PORT);
 }
 
+    private static boolean doesUserExist(int userId) throws IOException {
+        String url = "http://localhost:14001/user/" + userId;  // UserService is on port 14001
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        int responseCode = conn.getResponseCode();
+        conn.disconnect();
+        return responseCode == 200;  // User exists if response is 200 OK
+    }
 
     /**
      * Loads the configuration from a JSON file.
@@ -77,9 +88,12 @@ private static void setupDatabase() {
         String createOrdersTable = "CREATE TABLE IF NOT EXISTS orders (" +
                 "id TEXT PRIMARY KEY, user_id INTEGER, product_id INTEGER, quantity INTEGER);";
 
+
         String createUserPurchasesTable = "CREATE TABLE IF NOT EXISTS user_purchases (" +
-                "user_id INTEGER, product_id INTEGER, quantity INTEGER, " +
-                "PRIMARY KEY (user_id, product_id));";
+            "user_id INTEGER, " +
+            "product_id INTEGER, " +
+            "quantity INTEGER, " +
+            "PRIMARY KEY (user_id, product_id));";
 
         conn.createStatement().execute(createOrdersTable);
         conn.createStatement().execute(createUserPurchasesTable);
@@ -160,6 +174,20 @@ private static void setupDatabase() {
     }
 
     try (Connection conn = connectDB()) {
+        // Check if the user exists via UserService
+    if (!doesUserExist(userId)) {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        String jsonResponse = "{\"error\": \"User not found\"}";
+        byte[] responseBytes = jsonResponse.getBytes();
+        exchange.sendResponseHeaders(404, responseBytes.length);
+        OutputStream os = exchange.getResponseBody();
+        os.write(responseBytes);
+        os.close();
+        return;
+    }
+
+        
+        // Get user purchases
         String sql = "SELECT product_id, quantity FROM user_purchases WHERE user_id = ?;";
         PreparedStatement stmt = conn.prepareStatement(sql);
         stmt.setInt(1, userId);

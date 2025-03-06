@@ -121,7 +121,7 @@ delete_data() {
     sqlite3 "$BASE_DIR/compiled/ProductService/product_service.db" "DELETE FROM products;"
     
     echo "Deleting all data from OrderService database..."
-    sqlite3 "$BASE_DIR/compiled/OrderService/order_service.db" "DELETE FROM orders;"
+    sqlite3 "$BASE_DIR/compiled/OrderService/order_service.db" "DELETE FROM orders; DELETE FROM user_purchases;"
     
     echo "All data deleted."
 }
