@@ -161,6 +161,21 @@ stop_services() {
     echo "All services shutdown requested."
 }
 
+restart_services() {
+    echo "Restarting all services..."
+
+    # Start all services
+    ./runme.sh -c
+    ./runme.sh -u &  # Start UserService
+    ./runme.sh -p &  # Start ProductService
+    ./runme.sh -o &  # Start OrderService
+    ./runme.sh -i &  # Start ISCS
+    echo "Waiting for services to start..."
+    sleep 5  # Adjust this based on how long your services take to start
+
+    echo "All services restarted".    
+}
+
 case "$1" in
     -c) compile ;;
     -u) start_user_service ;;
@@ -170,5 +185,6 @@ case "$1" in
     -w) start_workload_parser "$@" ;;
     -d) delete_data ;;  # New command to delete data
     -s) stop_services ;; # Stops all running services
-    *) echo "Usage: ./runme.sh -c|-u|-p|-i|-o|-w workloadfile|-d|-s" ;;
+    -r) restart_services ;; # Restart all services
+    *) echo "Usage: ./runme.sh -c|-u|-p|-i|-o|-w workloadfile|-d|-s|-r" ;;
 esac
