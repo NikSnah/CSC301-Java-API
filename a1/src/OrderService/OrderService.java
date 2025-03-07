@@ -28,7 +28,8 @@ public class OrderService {
     private static int PORT;
     private static String DB_URL;
     private static String ISCS_URL;
-
+    private static String USER_SERVICE_URL;
+    
      /**
      * The main method initializes the OrderService.
      * It loads configurations, sets up the database, and starts an HTTP server.
@@ -52,7 +53,7 @@ public static void main(String[] args) throws IOException {
 }
 
     private static boolean doesUserExist(int userId) throws IOException {
-        String url = "http://localhost:14001/user/" + userId;  // UserService is on port 14001
+        String url = USER_SERVICE_URL + "/" + userId; 
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(5000);
@@ -74,6 +75,7 @@ public static void main(String[] args) throws IOException {
             PORT = config.getJSONObject("OrderService").getInt("port");
             DB_URL = "jdbc:sqlite:compiled/OrderService/order_service.db";
             ISCS_URL = "http://" + config.getJSONObject("InterServiceCommunication").getString("ip") + ":" + config.getJSONObject("InterServiceCommunication").getInt("port") + "/route";
+            USER_SERVICE_URL = "http://" + config.getJSONObject("UserService").getString("ip") + ":" + config.getJSONObject("UserService").getInt("port") + "/user";
         } catch (Exception e) {
             System.err.println("Failed to load config file.");
             System.exit(1);

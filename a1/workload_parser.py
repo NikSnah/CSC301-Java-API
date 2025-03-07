@@ -28,8 +28,12 @@ def shutdown_services():
 
 def restart_services():
     """Restart services and reset databases if necessary."""
-    print("[INFO] Restarting services...")  
-    subprocess.run(["./runme.sh", "-r"])  # Calls restart_services in runme.sh
+    print("[INFO] Restarting services...")
+    subprocess.run(["./runme.sh", "-c"])  # Recompile Java services
+    subprocess.run(["./runme.sh", "-u"])  # Start UserService
+    subprocess.run(["./runme.sh", "-p"])  # Start ProductService
+    subprocess.run(["./runme.sh", "-o"])  # Start OrderService
+    subprocess.run(["./runme.sh", "-i"])  # Start ISCS
 
     print("[INFO] Checking if database needs to be reset...")
     global was_restart_first
@@ -60,7 +64,6 @@ def parse_workload(workload_file, config):
         lines = f.readlines()
 
     first_command = None
-    restart_check = False  # Flag to check if restart follows shutdown
 
     for i, line in enumerate(lines):
         line = line.strip()
@@ -76,19 +79,14 @@ def parse_workload(workload_file, config):
         if command == "shutdown":
             print("[INFO] Received shutdown command. Stopping services...")
             shutdown_services()
-            restart_check = True  # Mark that we need to check for restart in the next line
-            continue  # Stop processing further commands
+            break  # Stop processing further commands
 
-        elif restart_check and command == "restart":
-            print("[INFO] Restart detected after shutdown. Restarting services...")
-            was_restart_first = True
+        elif command == "restart":
+            if i == 0:  # First command after start
+                was_restart_first = True
+                print("[INFO] Restart is the first command. Keeping database.")
             restart_services()
-            restart_next = False
             continue
-        
-        elif restart_check:
-            print("[INFO] No restart detected after shutdown. Exiting workload execution...")
-            return # Stop execution if restart does not follow shutdown
 
         # Process other commands
         process_command(parts, config)
