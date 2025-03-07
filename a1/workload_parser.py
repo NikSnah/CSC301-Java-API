@@ -18,7 +18,6 @@ def load_config(config_file):
 
 # component 1 stuff 
 
-global was_restart_first
 
 def shutdown_services():
     """Trigger service shutdown via Bash script."""
@@ -29,21 +28,7 @@ def shutdown_services():
 def restart_services():
     """Restart services and reset databases if necessary."""
     print("[INFO] Restarting services...")
-    subprocess.run(["./runme.sh", "-c"])  # Recompile Java services
-    subprocess.run(["./runme.sh", "-u"])  # Start UserService
-    subprocess.run(["./runme.sh", "-p"])  # Start ProductService
-    subprocess.run(["./runme.sh", "-o"])  # Start OrderService
-    subprocess.run(["./runme.sh", "-i"])  # Start ISCS
-
-    print("[INFO] Checking if database needs to be reset...")
-    global was_restart_first
-
-    # If restart was not the first command, wipe the databases using Bash script
-    if not was_restart_first:
-        print("[WARNING] Restart was not the first command. Resetting all databases...")
-        reset_databases()
-    else:
-        print("[INFO] Keeping existing database data.")
+    subprocess.run(["./runme.sh", "-r"])  # Recompile Java services
 
 def reset_databases():
     """Call the Bash script to reset all databases."""
@@ -57,39 +42,46 @@ def reset_databases():
 
 def parse_workload(workload_file, config):
     """Parse and process commands from the workload file."""
-    global was_restart_first
-    was_restart_first = False
 
     with open(workload_file, 'r') as f:
         lines = f.readlines()
 
-    first_command = None
+    if not lines:  # If the workload file is empty, just return
+        print("[INFO] Workload file is empty. Nothing to process.")
+        return
+     
+    first_command_processed = False #ensures that first command checks for restart
 
     for i, line in enumerate(lines):
         line = line.strip()
         if not line or line.startswith("#"):  # Skip empty lines and comments
             continue
 
-        if first_command is None:
-            first_command = line
-
         parts = line.split()
         command = parts[0].lower()
 
-        if command == "shutdown":
-            print("[INFO] Received shutdown command. Stopping services...")
-            shutdown_services()
-            break  # Stop processing further commands
+        if not first_command_processed:  # Process the actual first valid command
+            first_command_processed = True
 
-        elif command == "restart":
-            if i == 0:  # First command after start
-                was_restart_first = True
-                print("[INFO] Restart is the first command. Keeping database.")
-            restart_services()
-            continue
-
-        # Process other commands
-        process_command(parts, config)
+            if command == "restart":
+                print("[INFO] Restart detected at startup. Retaining database.")
+                restart_services()
+            else:
+                print("[WARNING] Restart not detected at startup. Resetting database.")
+                reset_databases()
+                process_command(parts, config)
+        else:
+            if command == "shutdown":
+                print("[INFO] Received shutdown command. Stopping services...")
+                shutdown_services()
+                return  # Stop processing further commands
+            elif command == "restart":
+                print("[INFO] Received restart command. Restarting services and resetting databases...")
+                reset_databases()
+                restart_services()
+            else:
+                # Process other commands
+                process_command(parts, config)
 
 def process_command(parts, config):
     """Process user, product, and order service commands."""

@@ -121,7 +121,7 @@ delete_data() {
     sqlite3 "$BASE_DIR/compiled/ProductService/product_service.db" "DELETE FROM products;"
     
     echo "Deleting all data from OrderService database..."
-    sqlite3 "$BASE_DIR/compiled/OrderService/order_service.db" "DELETE FROM orders;"
+    sqlite3 "$BASE_DIR/compiled/OrderService/order_service.db" "DELETE FROM orders; DELETE FROM user_purchases;"
     
     echo "All data deleted."
 }
@@ -164,6 +164,39 @@ stop_services() {
 restart_services() {
     echo "Restarting all services..."
 
+# Added check to ensure that services are not already running, and stop them if they are running
+    CONFIG_FILE="$BASE_DIR/config.json"
+
+    # Extract service IPs and ports from config.json
+    USER_IP=$(jq -r '.UserService.ip' $CONFIG_FILE)
+    USER_PORT=$(jq -r '.UserService.port' $CONFIG_FILE)
+    
+    PRODUCT_IP=$(jq -r '.ProductService.ip' $CONFIG_FILE)
+    PRODUCT_PORT=$(jq -r '.ProductService.port' $CONFIG_FILE)
+    
+    ORDER_IP=$(jq -r '.OrderService.ip' $CONFIG_FILE)
+    ORDER_PORT=$(jq -r '.OrderService.port' $CONFIG_FILE)
+    
+    ISCS_IP=$(jq -r '.InterServiceCommunication.ip' $CONFIG_FILE)
+    ISCS_PORT=$(jq -r '.InterServiceCommunication.port' $CONFIG_FILE)
+
+    # Check if services are already running
+    SERVICES_RUNNING=false
+
+    for PORT in "$USER_PORT" "$PRODUCT_PORT" "$ORDER_PORT" "$ISCS_PORT"; do
+        if lsof -i :$PORT >/dev/null 2>&1; then
+            echo "[INFO] Detected a service already running on port $PORT."
+            SERVICES_RUNNING=true
+        fi
+    done
+
+    # If any services are running, stop them first
+    if $SERVICES_RUNNING; then
+        echo "[INFO] Some services are already running. Stopping them first..."
+        stop_services
+        sleep 2  # Give time for cleanup
+    fi
+
     # Start all services
     ./runme.sh -c
     ./runme.sh -u &  # Start UserService
@@ -171,7 +204,7 @@ restart_services() {
     ./runme.sh -o &  # Start OrderService
     ./runme.sh -i &  # Start ISCS
     echo "Waiting for services to start..."
-    sleep 5  # Adjust this based on how long your services take to start
+    sleep 3  # Adjust this based on how long your services take to start
 
     echo "All services restarted".    
 }
