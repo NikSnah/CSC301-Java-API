@@ -16,6 +16,8 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 
 /**
@@ -26,6 +28,9 @@ import java.sql.SQLException;
 public class UserService {
     private static int PORT;
     private static String DB_URL;
+    private static final String DB_USER = "userservice_user";
+    private static final String DB_PASS = "password";    
+    private static ExecutorService threadPool; 
 
      /**
      * Initializes the UserService, loads configurations, sets up the database, 
@@ -40,7 +45,8 @@ public class UserService {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/user", new UserHandler());
         server.createContext("/shutdown", new ShutdownHandler(server));
-        server.setExecutor(null);
+        threadPool = Executors.newFixedThreadPool(100);
+        server.setExecutor(threadPool);
         server.start();
         System.out.println("UserService started on port " + PORT);
     }
@@ -55,7 +61,7 @@ public class UserService {
             String content = new String(Files.readAllBytes(Paths.get(filePath)));
             JSONObject config = new JSONObject(content);
             PORT = config.getJSONObject("UserService").getInt("port");
-            DB_URL = "jdbc:sqlite:compiled/UserService/user_service.db";
+            DB_URL = "jdbc:postgresql://localhost:5432/userservice_db"; // 5432 port
         } catch (Exception e) {
             System.err.println("Failed to load config file.");
             System.exit(1);
@@ -63,11 +69,18 @@ public class UserService {
     }
 
     /**
-     * Creates the users table in SQLite if it does not already exist.
+     * Creates the users table in PostgreSQL if it does not already exist.
      */
     private static void setupDatabase() {
         try (Connection conn = connectDB()) {
-            String sql = "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, password TEXT);";
+            String sql = """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE,
+                email TEXT UNIQUE,
+                password TEXT
+            );
+            """;
             conn.createStatement().execute(sql);
         } catch (SQLException e) {
             e.printStackTrace();
@@ -75,18 +88,18 @@ public class UserService {
     }
 
     /**
-     * Establishes a connection to the SQLite database.
+     * Establishes a connection to the PostgreSQL database.
      *
      * @return A Connection object.
      * @throws SQLException if the connection fails.
      */
     private static Connection connectDB() throws SQLException {
         try {
-            Class.forName("org.sqlite.JDBC");
+            Class.forName("org.postgresql.Driver");
         } catch (ClassNotFoundException e) {
-            throw new SQLException("SQLite JDBC Driver not found", e);
+            throw new SQLException("PostgreSQL JDBC Driver not found", e);
         }
-        return DriverManager.getConnection(DB_URL);
+        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
     }
 
 
@@ -135,6 +148,7 @@ public class UserService {
                 System.out.println("UserService shutting down...");
                 exchange.sendResponseHeaders(200, -1);
                 server.stop(0); // Graceful shutdown
+                threadPool.shutdown();
             } else {
                 exchange.sendResponseHeaders(405, -1);
             }
@@ -380,8 +394,11 @@ public class UserService {
                 PreparedStatement stmt = conn.prepareStatement(sql);
                 stmt.setInt(1, id);
                 ResultSet rs = stmt.executeQuery();
-                return rs.getInt(1) > 0;
-            }
+                if (rs.next()) { 
+                    return rs.getInt(1) > 0;
+                } else {
+                    return false; 
+                }            }
         }
 
         /**

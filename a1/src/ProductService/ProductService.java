@@ -14,7 +14,8 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The ProductService class implements a RESTful microservice for managing products.
@@ -23,6 +24,9 @@ import java.sql.SQLException;
 public class ProductService {
     private static int PORT;
     private static String DB_URL;
+    private static final String DB_USER = "productservice_user";
+    private static final String DB_PASS = "password";
+    private static ExecutorService threadPool; 
 
 
     /**
@@ -38,7 +42,8 @@ public class ProductService {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/product", new ProductHandler());
         server.createContext("/shutdown", new ShutdownHandler(server));
-        server.setExecutor(null);
+        threadPool = Executors.newFixedThreadPool(100);
+        server.setExecutor(threadPool);        
         server.start();
         System.out.println("ProductService started on port " + PORT);
     }
@@ -54,7 +59,7 @@ public class ProductService {
             String content = new String(Files.readAllBytes(Paths.get(filePath)));
             JSONObject config = new JSONObject(content);
             PORT = config.getJSONObject("ProductService").getInt("port");
-            DB_URL = "jdbc:sqlite:compiled/ProductService/product_service.db";
+            DB_URL = "jdbc:postgresql://localhost:5432/productservice_db"; 
         } catch (Exception e) {
             System.err.println("Failed to load config file.");
             System.exit(1);
@@ -81,11 +86,11 @@ public class ProductService {
      */
     private static Connection connectDB() throws SQLException {
         try {
-            Class.forName("org.sqlite.JDBC");
+            Class.forName("org.postgresql.Driver");
         } catch (ClassNotFoundException e) {
-            throw new SQLException("SQLite JDBC Driver not found", e);
+            throw new SQLException("PostgreSQL JDBC Driver not found", e);
         }
-        return DriverManager.getConnection(DB_URL);
+        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
     }
 
     /**
@@ -109,6 +114,7 @@ public class ProductService {
                 System.out.println("ProductService shutting down...");
                 exchange.sendResponseHeaders(200, -1);
                 server.stop(0); // Graceful shutdown
+                threadPool.shutdown();
             } else {
                 exchange.sendResponseHeaders(405, -1);
             }
@@ -426,8 +432,12 @@ public class ProductService {
                 PreparedStatement stmt = conn.prepareStatement(sql);
                 stmt.setInt(1, id);
                 ResultSet rs = stmt.executeQuery();
-                return rs.getInt(1) > 0;
-            }
+                if (rs.next()) {
+                    int count = rs.getInt(1);
+                    return count > 0;
+                } else {
+                    return false;
+                }            }
         }
 
         /**

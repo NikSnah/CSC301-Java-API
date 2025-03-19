@@ -3,6 +3,12 @@
 BASE_DIR="$(dirname "$(realpath "$0")")"
 LIBS_DIR="$BASE_DIR/libs"
 
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    PLATFORM="mac"
+else
+    PLATFORM="linux"
+fi
+
 # Ensure the libs directory exists
 mkdir -p "$LIBS_DIR"
 
@@ -28,20 +34,20 @@ install_pip() {
 install_dependencies() {
     echo "Downloading required JAR libraries..."
     
-    # SQLite JDBC
-    SQLITE_JDBC_URL="https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.42.0.0/sqlite-jdbc-3.42.0.0.jar"
-    SQLITE_JDBC_FILE="$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar"
+    # PostgreSQL JDBC
+    POSTGRES_JDBC_URL="https://jdbc.postgresql.org/download/postgresql-42.2.27.jar"
+    POSTGRES_JDBC_FILE="$LIBS_DIR/postgresql-42.2.27.jar"
     
     # JSON Library
     JSON_JAR_URL="https://repo1.maven.org/maven2/org/json/json/20210307/json-20210307.jar"
     JSON_JAR_FILE="$LIBS_DIR/json-20210307.jar"
 
-    # Download SQLite JDBC if it doesn't exist
-    if [ ! -f "$SQLITE_JDBC_FILE" ]; then
-        echo "Downloading SQLite JDBC..."
-        curl -L -o "$SQLITE_JDBC_FILE" "$SQLITE_JDBC_URL"
+    # Download PostgreSQL JDBC if it doesn't exist
+    if [ ! -f "$POSTGRES_JDBC_FILE" ]; then
+        echo "Downloading PostgreSQL JDBC..."
+        curl -L -o "$POSTGRES_JDBC_FILE" "$POSTGRES_JDBC_URL"
     else
-        echo "SQLite JDBC already exists, skipping download."
+        echo "PostgreSQL JDBC already exists, skipping download."
     fi
 
     # Download JSON library if it doesn't exist
@@ -74,38 +80,76 @@ compile() {
     mkdir -p "$BASE_DIR/compiled/OrderService"
     mkdir -p "$BASE_DIR/compiled/ISCS"
     
-    javac -cp "$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/UserService" "$BASE_DIR/src/UserService/"*.java
-    javac -cp "$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/ProductService" "$BASE_DIR/src/ProductService/"*.java
-    javac -cp "$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/OrderService" "$BASE_DIR/src/OrderService/"*.java
-    javac -cp "$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/ISCS" "$BASE_DIR/src/ISCS/"*.java
+    javac -cp "$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/UserService" "$BASE_DIR/src/UserService/"*.java
+    javac -cp "$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/ProductService" "$BASE_DIR/src/ProductService/"*.java
+    javac -cp "$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/OrderService" "$BASE_DIR/src/OrderService/"*.java
+    javac -cp "$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" -d "$BASE_DIR/compiled/ISCS" "$BASE_DIR/src/ISCS/"*.java
     
     echo "Compilation complete."
 }
 
+setup_postgres_db() {
+    local dbname=$1
+    local dbuser=$2
+    local dbpass=$3
+
+    if [[ "$PLATFORM" == "mac" ]]; then
+        if ! brew services list | grep -q "postgresql@14.*started"; then
+        brew services start postgresql@14 >/dev/null 2>&1
+        fi
+        PSQL_CMD="psql postgres"
+    else
+        sudo service postgresql start
+        PSQL_CMD="sudo -u postgres psql"
+    fi
+
+    # Create user if needed
+    $PSQL_CMD -q <<EOF
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '$dbuser') THEN
+        CREATE USER $dbuser WITH PASSWORD '$dbpass';
+    END IF;
+END
+\$\$;
+EOF
+
+    # Create DB if needed
+    $PSQL_CMD -q -tc "SELECT 1 FROM pg_database WHERE datname = '$dbname'" | grep -q 1 || \
+      $PSQL_CMD -q -c "CREATE DATABASE $dbname WITH OWNER $dbuser;"
+
+    #Grant DB-level and table-level permissions
+    $PSQL_CMD -q -c "GRANT ALL PRIVILEGES ON DATABASE $dbname TO $dbuser;"
+    $PSQL_CMD -q -d "$dbname" -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $dbuser;"
+    $PSQL_CMD -q -d "$dbname" -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $dbuser;"
+    $PSQL_CMD -q -d "$dbname" -c "ALTER DEFAULT PRIVILEGES FOR ROLE $dbuser IN SCHEMA public GRANT ALL ON TABLES TO $dbuser;"
+    $PSQL_CMD -q -d "$dbname" -c "ALTER DEFAULT PRIVILEGES FOR ROLE $dbuser IN SCHEMA public GRANT ALL ON SEQUENCES TO $dbuser;"
+
+}
+
 start_user_service() {
-    echo "Initializing UserService database..."
-    sqlite3 "$BASE_DIR/compiled/UserService/user_service.db" "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, email TEXT, password TEXT);"
     echo "Starting UserService..."
-    java -cp "$BASE_DIR/compiled/UserService:$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" microservices.UserService "$BASE_DIR/config.json" 
+    # Call DB setup before launching service
+    setup_postgres_db "userservice_db" "userservice_user" "password"
+    # Launch UserService with PostgreSQL JDBC driver
+    java -cp "$BASE_DIR/compiled/UserService:$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" microservices.UserService "$BASE_DIR/config.json"
 }
 
 start_product_service() {
-    echo "Initializing ProductService database..."
-    sqlite3 "$BASE_DIR/compiled/ProductService/product_service.db" "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, description TEXT, price REAL, quantity INTEGER);"
     echo "Starting ProductService..."
-    java -cp "$BASE_DIR/compiled/ProductService:$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" microservices.ProductService "$BASE_DIR/config.json" 
+    setup_postgres_db "productservice_db" "productservice_user" "password"
+    java -cp "$BASE_DIR/compiled/ProductService:$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" microservices.ProductService "$BASE_DIR/config.json"
 }
 
 start_order_service() {
-    echo "Initializing OrderService database..."
-    sqlite3 "$BASE_DIR/compiled/OrderService/order_service.db" "CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, product_id INTEGER, user_id INTEGER, quantity INTEGER);"
     echo "Starting OrderService..."
-    java -cp "$BASE_DIR/compiled/OrderService:$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" microservices.OrderService "$BASE_DIR/config.json" 
+    setup_postgres_db "orderservice_db" "orderservice_user" "password"
+    java -cp "$BASE_DIR/compiled/OrderService:$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" microservices.OrderService "$BASE_DIR/config.json"
 }
 
 start_iscs() {
     echo "Starting ISCS..."
-    java -cp "$BASE_DIR/compiled/ISCS:$LIBS_DIR/sqlite-jdbc-3.42.0.0.jar:$LIBS_DIR/json-20210307.jar" microservices.ISCS "$BASE_DIR/config.json" 
+    java -cp "$BASE_DIR/compiled/ISCS:$LIBS_DIR/postgresql-42.2.27.jar:$LIBS_DIR/json-20210307.jar" microservices.ISCS "$BASE_DIR/config.json" 
 }
 
 start_workload_parser() {
@@ -113,15 +157,32 @@ start_workload_parser() {
     python3 "$BASE_DIR/workload_parser.py" "$2" 
 }
 
+delete_postgres_data() {
+    local dbname=$1
+    shift  # Remaining args are table names
+
+    if [[ "$PLATFORM" == "mac" ]]; then
+        PSQL_CMD="psql -d $dbname"
+    else
+        PSQL_CMD="sudo -u postgres psql -d $dbname"
+    fi
+
+    for table in "$@"; do
+        echo "Deleting data from table: $table in DB: $dbname"
+        $PSQL_CMD -q -c "DELETE FROM $table;" \
+          || echo "Warning: Could not delete data from $table"
+    done
+}
+
 delete_data() {
     echo "Deleting all data from UserService database..."
-    sqlite3 "$BASE_DIR/compiled/UserService/user_service.db" "DELETE FROM users;"
+    delete_postgres_data "userservice_db" "users"
     
     echo "Deleting all data from ProductService database..."
-    sqlite3 "$BASE_DIR/compiled/ProductService/product_service.db" "DELETE FROM products;"
+    delete_postgres_data "productservice_db" "products"
     
     echo "Deleting all data from OrderService database..."
-    sqlite3 "$BASE_DIR/compiled/OrderService/order_service.db" "DELETE FROM orders; DELETE FROM user_purchases;"
+    delete_postgres_data "orderservice_db" "orders" "user_purchases"
     
     echo "All data deleted."
 }

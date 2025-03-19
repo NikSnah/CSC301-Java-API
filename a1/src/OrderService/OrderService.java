@@ -18,7 +18,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Scanner;
 import java.util.UUID;
-
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 /**
  * The OrderService class implements a RESTful microservice for handling orders.
  * It processes order requests, interacts with the ISCS (Inter-Service Communication Service),
@@ -29,7 +30,11 @@ public class OrderService {
     private static String DB_URL;
     private static String ISCS_URL;
     private static String USER_SERVICE_URL;
-    
+    private static final String DB_USER = "orderservice_user";
+    private static final String DB_PASS = "password";
+    private static ExecutorService threadPool; 
+
+
      /**
      * The main method initializes the OrderService.
      * It loads configurations, sets up the database, and starts an HTTP server.
@@ -47,7 +52,8 @@ public static void main(String[] args) throws IOException {
     server.createContext("/order", new OrderHandler());
     server.createContext("/shutdown", new ShutdownHandler(server));
     server.createContext("/user/purchased", new OrderHandler());
-    server.setExecutor(null);
+    threadPool = Executors.newFixedThreadPool(100);
+    server.setExecutor(threadPool);
     server.start();
     System.out.println("OrderService started on port " + PORT);
 }
@@ -73,7 +79,7 @@ public static void main(String[] args) throws IOException {
             String content = new String(Files.readAllBytes(Paths.get(filePath)));
             JSONObject config = new JSONObject(content);
             PORT = config.getJSONObject("OrderService").getInt("port");
-            DB_URL = "jdbc:sqlite:compiled/OrderService/order_service.db";
+            DB_URL = "jdbc:postgresql://localhost:5432/orderservice_db"; 
             ISCS_URL = "http://" + config.getJSONObject("InterServiceCommunication").getString("ip") + ":" + config.getJSONObject("InterServiceCommunication").getInt("port") + "/route";
             USER_SERVICE_URL = "http://" + config.getJSONObject("UserService").getString("ip") + ":" + config.getJSONObject("UserService").getInt("port") + "/user";
         } catch (Exception e) {
@@ -113,11 +119,11 @@ private static void setupDatabase() {
      */
     private static Connection connectDB() throws SQLException {
         try {
-            Class.forName("org.sqlite.JDBC");
+            Class.forName("org.postgresql.Driver");
         } catch (ClassNotFoundException e) {
-            throw new SQLException("SQLite JDBC Driver not found", e);
+            throw new SQLException("PostgreSQL JDBC Driver not found", e);
         }
-        return DriverManager.getConnection(DB_URL);
+        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
     }
 
     /**
@@ -141,6 +147,7 @@ private static void setupDatabase() {
                 System.out.println("Order Service shutting down...");
                 exchange.sendResponseHeaders(200, -1);
                 server.stop(0); // Graceful shutdown
+                threadPool.shutdown();
             } else {
                 exchange.sendResponseHeaders(405, -1);
             }
@@ -306,12 +313,11 @@ private static void setupDatabase() {
                 // Update user_purchases table
                 String updatePurchaseSql = "INSERT INTO user_purchases (user_id, product_id, quantity) " +
                                         "VALUES (?, ?, ?) ON CONFLICT(user_id, product_id) " +
-                                        "DO UPDATE SET quantity = quantity + ?;";
+                                        "DO UPDATE SET quantity = user_purchases.quantity + EXCLUDED.quantity;";
                 PreparedStatement purchaseStmt = conn.prepareStatement(updatePurchaseSql);
                 purchaseStmt.setInt(1, userId);
                 purchaseStmt.setInt(2, productId);
                 purchaseStmt.setInt(3, quantity);
-                purchaseStmt.setInt(4, quantity);
                 purchaseStmt.executeUpdate();
 
                 return orderId;
