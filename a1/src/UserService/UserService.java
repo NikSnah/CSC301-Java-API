@@ -16,7 +16,8 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The UserService class provides an HTTP-based microservice for user management.
@@ -40,8 +41,8 @@ public class UserService {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/user", new UserHandler());
         server.createContext("/shutdown", new ShutdownHandler(server));
-        server.setExecutor(null);
-        server.start();
+        threadPool = Executors.newFixedThreadPool(100);
+        server.setExecutor(threadPool);        server.start();
         System.out.println("UserService started on port " + PORT);
     }
 

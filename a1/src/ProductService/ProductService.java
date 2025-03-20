@@ -14,7 +14,9 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The ProductService class implements a RESTful microservice for managing products.
@@ -38,8 +40,8 @@ public class ProductService {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/product", new ProductHandler());
         server.createContext("/shutdown", new ShutdownHandler(server));
-        server.setExecutor(null);
-        server.start();
+        threadPool = Executors.newFixedThreadPool(100);
+        server.setExecutor(threadPool);        server.start();
         System.out.println("ProductService started on port " + PORT);
     }
 

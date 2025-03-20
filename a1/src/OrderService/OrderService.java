@@ -18,6 +18,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Scanner;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The OrderService class implements a RESTful microservice for handling orders.
@@ -47,8 +49,8 @@ public static void main(String[] args) throws IOException {
     server.createContext("/order", new OrderHandler());
     server.createContext("/shutdown", new ShutdownHandler(server));
     server.createContext("/user/purchased", new OrderHandler());
-    server.setExecutor(null);
-    server.start();
+    threadPool = Executors.newFixedThreadPool(100);
+    server.setExecutor(threadPool);    server.start();
     System.out.println("OrderService started on port " + PORT);
 }
 
