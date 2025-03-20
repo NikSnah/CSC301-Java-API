@@ -1,59 +1,109 @@
 import requests
 import time
-from threading import Thread
+import random
+from concurrent.futures import ThreadPoolExecutor
 
-# Function to send POST requests
-def send_post_request(url, data):
-    try:
-        response = requests.post(url, data=data)
-        print("POST Request Status Code:", response.status_code)
-    except Exception as e:
-        print("Error sending POST request:", e)
+services = [
+    {"name": "UserService", "base_url": "http://127.0.0.1:14001/user"},
+    {"name": "ProductService", "base_url": "http://127.0.0.1:15000/product"},
+    {"name": "OrderService", "base_url": "http://127.0.0.1:14000/order"}
+]
 
-# Function to send GET requests
-def send_get_request(url):
-    try:
-        response = requests.get(url)
-        if response.status_code != 200:
-          print("GET Request Status Code:", response.status_code)
-          import sys
-          sys.exit(32)
-    except Exception as e:
-        print("Error sending GET request:", e)
+global_success = {service["name"]: 0 for service in services}
+global_fail = {service["name"]: 0 for service in services}
 
-# Function to send requests at a specified rate
-def send_requests(url, requests_per_second):
-    count = 0
-    while True:
-        count += 1
-        start_time = time.time()
+user_id = 1
+product_id = 1
+order_id = 1
 
-        # Send POST request with slightly different data each time
-        post_data = {"data": "example_data_" + str(time.time())}
-        #send_post_request(url, post_data)
+def is_successful(status_code):
+    # Success = only if the response is one of the expected application-level codes
+    return status_code in [200, 400, 401, 404, 409]
 
-        # Send GET request
-        send_get_request(url)
+def send_request(service):
+    global user_id, product_id, order_id
 
-        # Calculate time taken for this iteration
-        iteration_time = time.time() - start_time
+    if random.random() < 0.5:
+        # POST Request
+        if service["name"] == "UserService":
+            payload = {
+                "command": "create",
+                "id": user_id,
+                "username": f"user{user_id}",
+                "email": f"user{user_id}@test.com",
+                "password": "password"
+            }
+            url = service["base_url"]
+            user_id += 1
+        elif service["name"] == "ProductService":
+            payload = {
+                "command": "create",
+                "id": product_id,
+                "name": f"product{product_id}",
+                "description": "desc",
+                "price": 10.0,
+                "quantity": 50
+            }
+            url = service["base_url"]
+            product_id += 1
+        elif service["name"] == "OrderService":
+            if product_id == 1 or user_id == 1:
+                return True  # logically skip
+            payload = {
+                "command": "place order",
+                "id": str(order_id),
+                "product_id": random.randint(1, max(1, product_id - 1)),
+                "user_id": random.randint(1, max(1, user_id - 1)),
+                "quantity": 1
+            }
+            url = service["base_url"]
+            order_id += 1
+        else:
+            return True  # unknown service
 
-        
-        # Calculate time to sleep before next iteration to achieve desired requests per second
-        time_to_sleep = max(1/requests_per_second, 1 / requests_per_second - iteration_time)
-        time.sleep(time_to_sleep)
-        
-        # Calculate requests per second
-        elapsed_time = time.time() - start_time
-        actual_requests_per_second = 1 / elapsed_time
-        if count % (5*requests_per_second) == 0:
-          print("Requests per second:", actual_requests_per_second, "sleep time:", time_to_sleep)
+        try:
+            r = requests.post(url, json=payload, timeout=1)
+            return is_successful(r.status_code)
+        except Exception:
+            return False
+    else:
+        # GET Request
+        if service["name"] == "UserService":
+            url = f"{service['base_url']}/{random.randint(1, max(1, user_id - 1))}"
+        elif service["name"] == "ProductService":
+            url = f"{service['base_url']}/{random.randint(1, max(1, product_id - 1))}"
+        elif service["name"] == "OrderService":
+            url = f"{service['base_url']}/{random.randint(1, max(1, order_id - 1))}"
+        else:
+            return True
 
-# Main function
+        try:
+            r = requests.get(url, timeout=1)
+            return is_successful(r.status_code)
+        except Exception:
+            return False
+
+def run_test(duration=5, threads=50):
+    print(f"Starting load test for {duration} seconds with {threads} threads...\n")
+    end_time = time.time() + duration
+
+    def task():
+        while time.time() < end_time:
+            service = random.choice(services)
+            success = send_request(service)
+            if success:
+                global_success[service["name"]] += 1
+            else:
+                global_fail[service["name"]] += 1
+
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        for _ in range(threads):
+            executor.submit(task)
+
+    print("\n==== FINAL RESULTS ====")
+    for service in services:
+        total = global_success[service["name"]] + global_fail[service["name"]]
+        print(f"{service['name']}: {global_success[service['name']]} successful out of {total} attempted")
+
 if __name__ == "__main__":
-    url = "http://127.0.0.1:10000/"  # Replace with your URL
-    requests_per_second = 100  # Replace with desired requests per second
-    # Start a thread to send requests repeatedly
-    t = Thread(target=send_requests, args=(url, requests_per_second))
-    t.start()
-
+    run_test(duration=5, threads=100)
