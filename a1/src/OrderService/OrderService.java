@@ -31,7 +31,8 @@ public class OrderService {
     private static String DB_URL;
     private static String ISCS_URL;
     private static String USER_SERVICE_URL;
-    
+    private static ExecutorService threadPool; 
+
      /**
      * The main method initializes the OrderService.
      * It loads configurations, sets up the database, and starts an HTTP server.

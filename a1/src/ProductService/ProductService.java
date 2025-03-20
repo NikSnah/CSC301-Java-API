@@ -25,7 +25,7 @@ import java.util.concurrent.Executors;
 public class ProductService {
     private static int PORT;
     private static String DB_URL;
-
+    private static ExecutorService threadPool; 
 
     /**
      * The main method initializes the ProductService.

@@ -27,6 +27,7 @@ import java.util.concurrent.Executors;
 public class UserService {
     private static int PORT;
     private static String DB_URL;
+    private static ExecutorService threadPool; 
 
      /**
      * Initializes the UserService, loads configurations, sets up the database, 
